@@ -1,0 +1,898 @@
+'use strict';
+
+var STORAGE_KEY = 'markdownNotes_v1';
+var FIRST_LAUNCH_KEY = 'markdownNotes_firstLaunch';
+
+// made by hanx https://hanx.pro
+// last update/touched 26.08.2026
+var state = {
+  notes: [],
+  activeNoteId: null,
+  searchQuery: '',
+  sortOrder: 'modified',
+  viewMode: 'split',
+  pendingDeleteId: null,
+};
+
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function createNote(title, content) {
+  var now = Date.now();
+  return {
+    id: generateId(),
+    title: title || '',
+    content: content || '',
+    createdAt: now,
+    modifiedAt: now,
+    pinned: false,
+  };
+}
+
+function saveToStorage() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.notes));
+  } catch (e) {
+    console.warn('localStorage save failed:', e);
+  }
+}
+
+function loadFromStorage() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('localStorage load failed:', e);
+  }
+  return null;
+}
+
+var SAMPLE_CONTENT = [
+  {
+    title: 'Welcome to Markdown Notes',
+    content: [
+      '# Welcome to Markdown Notes',
+      '',
+      'This is your personal Markdown notes app. Everything is saved locally in your browser.',
+      '',
+      '## Features',
+      '',
+      '- **Create** notes with the "+ New" button',
+      '- **Edit** notes with the Markdown editor on the left',
+      '- **Preview** rendered Markdown on the right',
+      '- **Search** notes by title or content',
+      '- **Pin** important notes to keep them at the top',
+      '- **Sort** by last modified, date created, or title A-Z',
+      '',
+      '## Keyboard Shortcuts',
+      '',
+      '- `Ctrl+S` — Save note',
+      '- `Ctrl+N` — New note',
+      '- `Escape` — Close modal / sidebar',
+      '',
+      '## Tips',
+      '',
+      '- Click **Preview** in the toolbar to cycle views: split, preview only, editor only.',
+      '- Notes are auto-saved 600 ms after you stop typing.',
+      '- Drag the center divider to resize the editor and preview panes.',
+      '',
+      '> All notes are saved in your browser localStorage and persist between sessions.',
+    ].join('\n'),
+  },
+  {
+    title: 'Markdown Syntax Reference',
+    content: [
+      '# Markdown Syntax Reference',
+      '',
+      '## Headings',
+      '',
+      'Use `#` for H1 through `######` for H6.',
+      '',
+      '## Text Formatting',
+      '',
+      '**Bold** — `**text**`',
+      '*Italic* — `*text*`',
+      '***Bold and italic*** — `***text***`',
+      '',
+      '## Lists',
+      '',
+      'Unordered:',
+      '',
+      '- Item one',
+      '- Item two',
+      '  - Nested item',
+      '',
+      'Ordered:',
+      '',
+      '1. First',
+      '2. Second',
+      '3. Third',
+      '',
+      '## Links',
+      '',
+      '[Visit hanx.lol](https://hanx.lol)',
+      '',
+      '## Inline Code',
+      '',
+      'Use `backticks` for inline code.',
+      '',
+      '## Code Block',
+      '',
+      '```javascript',
+      'function greet(name) {',
+      "  return 'Hello, ' + name + '!';",
+      '}',
+      '```',
+      '',
+      '## Blockquote',
+      '',
+      '> This is a blockquote.',
+      '> It can span multiple lines.',
+      '',
+      '## Horizontal Rule',
+      '',
+      '---',
+    ].join('\n'),
+  },
+  {
+    title: 'Project Ideas',
+    content: [
+      '# Project Ideas',
+      '',
+      '## In Progress',
+      '',
+      '- Personal Markdown notes app',
+      '- Command-line task manager',
+      '',
+      '## Backlog',
+      '',
+      '1. Static site generator from Markdown',
+      '2. Browser extension for quick capture',
+      '3. Terminal system stats dashboard',
+      '4. Pomodoro timer with task tracking',
+      '',
+      '## Reading List',
+      '',
+      '- *The Pragmatic Programmer*',
+      '- *Structure and Interpretation of Computer Programs*',
+      '- *Clean Code* by Robert C. Martin',
+      '',
+      '---',
+      '',
+      '> "The best way to predict the future is to invent it." — Alan Kay',
+      '',
+      '**Next review:** pick one item from backlog and set a start date.',
+    ].join('\n'),
+  },
+];
+
+function seedSampleNotes() {
+  var notes = [];
+  for (var i = 0; i < SAMPLE_CONTENT.length; i++) {
+    var s = SAMPLE_CONTENT[i];
+    var now = Date.now() - (SAMPLE_CONTENT.length - i) * 120000;
+    notes.push({
+      id: generateId(),
+      title: s.title,
+      content: s.content,
+      createdAt: now,
+      modifiedAt: now,
+      pinned: i === 0,
+    });
+  }
+  state.notes = notes;
+  saveToStorage();
+  localStorage.setItem(FIRST_LAUNCH_KEY, 'done');
+}
+
+function byId(id) { return document.getElementById(id); }
+
+var dom = {
+  sidebar: byId('sidebar'),
+  sidebarToggle: byId('sidebar-toggle'),
+  notesList: byId('notes-list'),
+  notesCount: byId('notes-count'),
+  searchInput: byId('search-input'),
+  sortSelect: byId('sort-select'),
+  btnNewNote: byId('btn-new-note'),
+  emptyState: byId('empty-state'),
+  noteEditor: byId('note-editor'),
+  btnNewNoteEmpty: byId('btn-new-note-empty'),
+  noteTitleInput: byId('note-title-input'),
+  saveIndicator: byId('save-indicator'),
+  btnPin: byId('btn-pin'),
+  btnDelete: byId('btn-delete'),
+  btnToggleView: byId('btn-toggle-view'),
+  editorPanels: byId('editor-panels'),
+  markdownInput: byId('markdown-input'),
+  previewOutput: byId('preview-output'),
+  charCount: byId('char-count'),
+  lastModified: byId('last-modified'),
+  modalOverlay: byId('modal-overlay'),
+  modalCancel: byId('modal-cancel'),
+  modalConfirm: byId('modal-confirm'),
+};
+
+var Markdown = (function () {
+
+  function textNode(str) {
+    return document.createTextNode(str);
+  }
+
+  function el(tag) {
+    return document.createElement(tag);
+  }
+
+  function parseInline(raw) {
+    var nodes = [];
+    var i = 0;
+    var buf = '';
+
+    function flush() {
+      if (buf.length > 0) {
+        nodes.push(textNode(buf));
+        buf = '';
+      }
+    }
+
+    function appendChildren(parent, children) {
+      for (var c = 0; c < children.length; c++) {
+        parent.appendChild(children[c]);
+      }
+    }
+
+    while (i < raw.length) {
+
+      if (raw[i] === '`') {
+        var j = i + 1;
+        while (j < raw.length && raw[j] !== '`') j++;
+        if (j < raw.length) {
+          flush();
+          var code = el('code');
+          code.textContent = raw.slice(i + 1, j);
+          nodes.push(code);
+          i = j + 1;
+          continue;
+        }
+      }
+
+      if (i + 2 < raw.length &&
+        raw[i] === '*' && raw[i + 1] === '*' && raw[i + 2] === '*') {
+        var end3 = raw.indexOf('***', i + 3);
+        if (end3 !== -1) {
+          flush();
+          var strong3 = el('strong');
+          var em3 = el('em');
+          appendChildren(em3, parseInline(raw.slice(i + 3, end3)));
+          strong3.appendChild(em3);
+          nodes.push(strong3);
+          i = end3 + 3;
+          continue;
+        }
+      }
+
+      if (i + 1 < raw.length && raw[i] === '*' && raw[i + 1] === '*') {
+        var end2 = raw.indexOf('**', i + 2);
+        if (end2 !== -1) {
+          flush();
+          var strong2 = el('strong');
+          appendChildren(strong2, parseInline(raw.slice(i + 2, end2)));
+          nodes.push(strong2);
+          i = end2 + 2;
+          continue;
+        }
+      }
+
+      if (raw[i] === '*' && raw[i + 1] !== '*') {
+        var end1 = raw.indexOf('*', i + 1);
+        if (end1 !== -1) {
+          flush();
+          var em1 = el('em');
+          appendChildren(em1, parseInline(raw.slice(i + 1, end1)));
+          nodes.push(em1);
+          i = end1 + 1;
+          continue;
+        }
+      }
+
+      if (raw[i] === '[') {
+        var closeBr = raw.indexOf(']', i + 1);
+        if (closeBr !== -1 && raw[closeBr + 1] === '(') {
+          var closePa = raw.indexOf(')', closeBr + 2);
+          if (closePa !== -1) {
+            flush();
+            var linkText = raw.slice(i + 1, closeBr);
+            var href = raw.slice(closeBr + 2, closePa).trim();
+            var a = el('a');
+            if (/^(https?:\/\/|mailto:|\/|#|\.\/)/.test(href) ||
+              !/^[a-z][a-z0-9+\-.]*:/i.test(href)) {
+              a.href = href;
+              if (/^https?:\/\//.test(href)) {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+              }
+            } else {
+              a.href = '#';
+            }
+            appendChildren(a, parseInline(linkText));
+            nodes.push(a);
+            i = closePa + 1;
+            continue;
+          }
+        }
+      }
+
+      if (raw[i] === '\n') {
+        flush();
+        nodes.push(el('br'));
+        i++;
+        continue;
+      }
+
+      buf += raw[i];
+      i++;
+    }
+
+    flush();
+    return nodes;
+  }
+
+  function parse(markdown) {
+    var fragment = document.createDocumentFragment();
+    if (!markdown || !markdown.trim()) return fragment;
+
+    var src = markdown.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    var lines = src.split('\n');
+    var i = 0;
+
+    function appendInline(parent, raw) {
+      var nodes = parseInline(raw);
+      for (var n = 0; n < nodes.length; n++) {
+        parent.appendChild(nodes[n]);
+      }
+    }
+
+    while (i < lines.length) {
+      var line = lines[i];
+
+      if (line.trim() === '') { i++; continue; }
+
+      var fenceMatch = line.match(/^(`{3,}|~{3,})(.*)/);
+      if (fenceMatch) {
+        var fence = fenceMatch[1];
+        var lang = fenceMatch[2].trim();
+        var pre = el('pre');
+        var code = el('code');
+        if (lang) code.setAttribute('data-lang', lang);
+        var codeLines = [];
+        i++;
+        while (i < lines.length && lines[i].slice(0, fence.length) !== fence) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        i++;
+        code.textContent = codeLines.join('\n');
+        pre.appendChild(code);
+        fragment.appendChild(pre);
+        continue;
+      }
+
+      var hMatch = line.match(/^(#{1,6})\s+(.*)/);
+      if (hMatch) {
+        var level = hMatch[1].length;
+        var h = el('h' + level);
+        appendInline(h, hMatch[2]);
+        fragment.appendChild(h);
+        i++;
+        continue;
+      }
+
+      if (/^(\s*[-*_]){3,}\s*$/.test(line)) {
+        fragment.appendChild(el('hr'));
+        i++;
+        continue;
+      }
+
+      if (/^>\s?/.test(line)) {
+        var bq = el('blockquote');
+        var bqLines = [];
+        while (i < lines.length && /^>\s?/.test(lines[i])) {
+          bqLines.push(lines[i].replace(/^>\s?/, ''));
+          i++;
+        }
+        bq.appendChild(parse(bqLines.join('\n')));
+        fragment.appendChild(bq);
+        continue;
+      }
+
+      if (/^\s*[-*+]\s+/.test(line)) {
+        var ul = el('ul');
+        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+          var liU = el('li');
+          appendInline(liU, lines[i].replace(/^\s*[-*+]\s+/, ''));
+          ul.appendChild(liU);
+          i++;
+        }
+        fragment.appendChild(ul);
+        continue;
+      }
+
+      if (/^\d+\.\s+/.test(line)) {
+        var ol = el('ol');
+        while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+          var liO = el('li');
+          appendInline(liO, lines[i].replace(/^\d+\.\s+/, ''));
+          ol.appendChild(liO);
+          i++;
+        }
+        fragment.appendChild(ol);
+        continue;
+      }
+
+      var pLines = [];
+      while (
+        i < lines.length &&
+        lines[i].trim() !== '' &&
+        !/^#{1,6}\s/.test(lines[i]) &&
+        !/^(`{3,}|~{3,})/.test(lines[i]) &&
+        !/^\s*[-*+]\s+/.test(lines[i]) &&
+        !/^\d+\.\s+/.test(lines[i]) &&
+        !/^>\s?/.test(lines[i]) &&
+        !/^(\s*[-*_]){3,}\s*$/.test(lines[i])
+      ) {
+        pLines.push(lines[i]);
+        i++;
+      }
+
+      if (pLines.length > 0) {
+        var p = el('p');
+        appendInline(p, pLines.join('\n'));
+        fragment.appendChild(p);
+      }
+    }
+
+    return fragment;
+  }
+
+  return { parse: parse };
+}());
+
+function renderPreview() {
+  var fragment = Markdown.parse(dom.markdownInput.value);
+  while (dom.previewOutput.firstChild) {
+    dom.previewOutput.removeChild(dom.previewOutput.firstChild);
+  }
+  dom.previewOutput.appendChild(fragment);
+}
+
+function renderNotesList() {
+  var query = state.searchQuery.toLowerCase().trim();
+
+  var filtered = state.notes.filter(function (note) {
+    if (!query) return true;
+    return (
+      note.title.toLowerCase().indexOf(query) !== -1 ||
+      note.content.toLowerCase().indexOf(query) !== -1
+    );
+  });
+
+  filtered.sort(function (a, b) {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    if (state.sortOrder === 'modified') return b.modifiedAt - a.modifiedAt;
+    if (state.sortOrder === 'created') return b.createdAt - a.createdAt;
+    if (state.sortOrder === 'title') return a.title.localeCompare(b.title);
+    return b.modifiedAt - a.modifiedAt;
+  });
+
+  while (dom.notesList.firstChild) {
+    dom.notesList.removeChild(dom.notesList.firstChild);
+  }
+
+  if (filtered.length === 0) {
+    var empty = document.createElement('li');
+    empty.className = 'notes-list-empty';
+    empty.textContent = query ? 'No notes match your search.' : 'No notes yet. Create one!';
+    dom.notesList.appendChild(empty);
+    dom.notesCount.textContent = '0 notes';
+    return;
+  }
+
+  var hasPinned = filtered.some(function (n) { return n.pinned; });
+  var hasUnpinned = filtered.some(function (n) { return !n.pinned; });
+  var dividerShown = false;
+
+  for (var idx = 0; idx < filtered.length; idx++) {
+    var note = filtered[idx];
+
+    if (hasPinned && hasUnpinned && !note.pinned && !dividerShown) {
+      var div = document.createElement('li');
+      div.className = 'note-item-divider';
+      div.setAttribute('role', 'separator');
+      dom.notesList.appendChild(div);
+      dividerShown = true;
+    }
+
+    var li = document.createElement('li');
+    li.className = 'note-item' + (note.id === state.activeNoteId ? ' active' : '');
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', note.id === state.activeNoteId ? 'true' : 'false');
+    li.dataset.id = note.id;
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'note-item-title';
+    titleEl.textContent = note.title.trim() || 'Untitled Note';
+
+    var metaEl = document.createElement('div');
+    metaEl.className = 'note-item-meta';
+
+    if (note.pinned) {
+      var badge = document.createElement('span');
+      badge.className = 'note-pin-badge';
+      badge.setAttribute('aria-label', 'Pinned');
+      metaEl.appendChild(badge);
+    }
+
+    var dateEl = document.createElement('span');
+    dateEl.className = 'note-item-date';
+    dateEl.textContent = formatRelativeDate(note.modifiedAt);
+    metaEl.appendChild(dateEl);
+
+    var excerptEl = document.createElement('div');
+    excerptEl.className = 'note-item-excerpt';
+    var cleaned = note.content.replace(/[#*_`>~\-=]/g, '').replace(/\s+/g, ' ').trim();
+    excerptEl.textContent = cleaned.length > 72 ? cleaned.slice(0, 72) + '...' : cleaned;
+
+    li.appendChild(titleEl);
+    li.appendChild(metaEl);
+    li.appendChild(excerptEl);
+
+    (function (noteId) {
+      li.addEventListener('click', function () { selectNote(noteId); });
+    }(note.id));
+
+    dom.notesList.appendChild(li);
+  }
+
+  var n = filtered.length;
+  dom.notesCount.textContent = n === 1 ? '1 note' : n + ' notes';
+}
+
+function formatRelativeDate(ts) {
+  var diff = Date.now() - ts;
+  var sec = Math.floor(diff / 1000);
+  if (sec < 60) return 'just now';
+  var min = Math.floor(sec / 60);
+  if (min < 60) return min + 'm ago';
+  var hr = Math.floor(min / 60);
+  if (hr < 24) return hr + 'h ago';
+  var day = Math.floor(hr / 24);
+  if (day < 7) return day + 'd ago';
+  var d = new Date(ts);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function updateEditorFooter(note) {
+  if (!note) {
+    dom.charCount.textContent = '';
+    dom.lastModified.textContent = '';
+    return;
+  }
+  var chars = note.content.length;
+  dom.charCount.textContent = chars + (chars === 1 ? ' char' : ' chars');
+  dom.lastModified.textContent = 'Modified ' + formatRelativeDate(note.modifiedAt);
+}
+
+function getNoteById(id) {
+  for (var i = 0; i < state.notes.length; i++) {
+    if (state.notes[i].id === id) return state.notes[i];
+  }
+  return null;
+}
+
+function selectNote(id) {
+  flushSave();
+
+  state.activeNoteId = id;
+  var note = getNoteById(id);
+  if (!note) return;
+
+  dom.noteEditor.classList.remove('hidden');
+  dom.emptyState.classList.add('hidden');
+
+  dom.noteTitleInput.value = note.title;
+  dom.markdownInput.value = note.content;
+
+  updatePinButton(note.pinned);
+  updateEditorFooter(note);
+  renderPreview();
+  renderNotesList();
+
+  if (window.innerWidth <= 768) {
+    dom.sidebar.classList.remove('open');
+    dom.sidebarToggle.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function newNote() {
+  flushSave();
+  var note = createNote('', '');
+  state.notes.unshift(note);
+  saveToStorage();
+  state.activeNoteId = note.id;
+
+  dom.noteEditor.classList.remove('hidden');
+  dom.emptyState.classList.add('hidden');
+  dom.noteTitleInput.value = '';
+  dom.markdownInput.value = '';
+  while (dom.previewOutput.firstChild) {
+    dom.previewOutput.removeChild(dom.previewOutput.firstChild);
+  }
+
+  updatePinButton(false);
+  updateEditorFooter(note);
+  renderNotesList();
+
+  dom.noteTitleInput.focus();
+}
+
+function deleteNote(id) {
+  var remaining = [];
+  for (var i = 0; i < state.notes.length; i++) {
+    if (state.notes[i].id !== id) remaining.push(state.notes[i]);
+  }
+  state.notes = remaining;
+  saveToStorage();
+
+  if (state.activeNoteId === id) {
+    state.activeNoteId = null;
+    dom.noteEditor.classList.add('hidden');
+    dom.emptyState.classList.remove('hidden');
+    dom.noteTitleInput.value = '';
+    dom.markdownInput.value = '';
+    while (dom.previewOutput.firstChild) {
+      dom.previewOutput.removeChild(dom.previewOutput.firstChild);
+    }
+  }
+
+  renderNotesList();
+}
+
+function togglePin() {
+  var note = getNoteById(state.activeNoteId);
+  if (!note) return;
+  note.pinned = !note.pinned;
+  note.modifiedAt = Date.now();
+  saveToStorage();
+  updatePinButton(note.pinned);
+  updateEditorFooter(note);
+  renderNotesList();
+}
+
+function updatePinButton(pinned) {
+  dom.btnPin.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+  dom.btnPin.title = pinned ? 'Unpin note' : 'Pin note';
+  if (pinned) {
+    dom.btnPin.classList.add('pinned');
+  } else {
+    dom.btnPin.classList.remove('pinned');
+  }
+}
+
+var saveDebounceTimer = null;
+
+function scheduleAutoSave() {
+  if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
+  dom.saveIndicator.textContent = 'Unsaved';
+  dom.saveIndicator.className = 'save-indicator saving';
+  saveDebounceTimer = setTimeout(function () {
+    flushSave();
+    saveDebounceTimer = null;
+  }, 600);
+}
+
+function flushSave() {
+  if (saveDebounceTimer) {
+    clearTimeout(saveDebounceTimer);
+    saveDebounceTimer = null;
+  }
+  var note = getNoteById(state.activeNoteId);
+  if (!note) return;
+  note.title = dom.noteTitleInput.value;
+  note.content = dom.markdownInput.value;
+  note.modifiedAt = Date.now();
+  saveToStorage();
+  updateEditorFooter(note);
+  renderNotesList();
+  dom.saveIndicator.textContent = 'Saved';
+  dom.saveIndicator.className = 'save-indicator saved';
+  setTimeout(function () {
+    if (dom.saveIndicator.textContent === 'Saved') {
+      dom.saveIndicator.textContent = '';
+      dom.saveIndicator.className = 'save-indicator';
+    }
+  }, 2000);
+}
+
+function cycleViewMode() {
+  if (state.viewMode === 'split') {
+    state.viewMode = 'preview';
+    dom.editorPanels.classList.remove('view-editor-only');
+    dom.editorPanels.classList.add('view-preview-only');
+    dom.btnToggleView.textContent = 'Editor';
+  } else if (state.viewMode === 'preview') {
+    state.viewMode = 'editor';
+    dom.editorPanels.classList.remove('view-preview-only');
+    dom.editorPanels.classList.add('view-editor-only');
+    dom.btnToggleView.textContent = 'Split';
+  } else {
+    state.viewMode = 'split';
+    dom.editorPanels.classList.remove('view-editor-only', 'view-preview-only');
+    dom.btnToggleView.textContent = 'Preview';
+  }
+}
+
+function showDeleteModal(id) {
+  state.pendingDeleteId = id;
+  dom.modalOverlay.classList.remove('hidden');
+  dom.modalConfirm.focus();
+}
+
+function hideDeleteModal() {
+  state.pendingDeleteId = null;
+  dom.modalOverlay.classList.add('hidden');
+}
+
+(function () {
+  var divider = byId('pane-divider');
+  var panels = byId('editor-panels');
+  var dragging = false;
+  var startX = 0;
+  var startLeftW = 0;
+
+  divider.addEventListener('mousedown', function (e) {
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    var pane = panels.querySelector('.pane-editor');
+    startLeftW = pane ? pane.offsetWidth : panels.offsetWidth / 2;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    var totalW = panels.offsetWidth;
+    var newLeft = startLeftW + (e.clientX - startX);
+    if (newLeft < 150) newLeft = 150;
+    if (newLeft > totalW - 150) newLeft = totalW - 150;
+    var paneEditor = panels.querySelector('.pane-editor');
+    var panePreview = panels.querySelector('.pane-preview');
+    if (paneEditor && panePreview) {
+      paneEditor.style.flex = 'none';
+      paneEditor.style.width = newLeft + 'px';
+      panePreview.style.flex = '1';
+      panePreview.style.width = '';
+    }
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+}());
+
+dom.btnNewNote.addEventListener('click', newNote);
+dom.btnNewNoteEmpty.addEventListener('click', newNote);
+
+dom.noteTitleInput.addEventListener('input', scheduleAutoSave);
+
+dom.markdownInput.addEventListener('input', function () {
+  renderPreview();
+  scheduleAutoSave();
+});
+
+dom.markdownInput.addEventListener('keydown', function (e) {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    var start = dom.markdownInput.selectionStart;
+    var end = dom.markdownInput.selectionEnd;
+    var val = dom.markdownInput.value;
+    dom.markdownInput.value = val.slice(0, start) + '  ' + val.slice(end);
+    dom.markdownInput.selectionStart = start + 2;
+    dom.markdownInput.selectionEnd = start + 2;
+    renderPreview();
+    scheduleAutoSave();
+  }
+});
+
+dom.searchInput.addEventListener('input', function (e) {
+  state.searchQuery = e.target.value;
+  renderNotesList();
+});
+
+dom.sortSelect.addEventListener('change', function (e) {
+  state.sortOrder = e.target.value;
+  renderNotesList();
+});
+
+dom.btnPin.addEventListener('click', togglePin);
+
+dom.btnDelete.addEventListener('click', function () {
+  if (state.activeNoteId) showDeleteModal(state.activeNoteId);
+});
+
+dom.modalCancel.addEventListener('click', hideDeleteModal);
+
+dom.modalConfirm.addEventListener('click', function () {
+  if (state.pendingDeleteId) {
+    deleteNote(state.pendingDeleteId);
+    hideDeleteModal();
+  }
+});
+
+dom.modalOverlay.addEventListener('click', function (e) {
+  if (e.target === dom.modalOverlay) hideDeleteModal();
+});
+
+dom.btnToggleView.addEventListener('click', cycleViewMode);
+
+dom.sidebarToggle.addEventListener('click', function () {
+  var isOpen = dom.sidebar.classList.toggle('open');
+  dom.sidebarToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+});
+
+document.addEventListener('keydown', function (e) {
+  var meta = e.ctrlKey || e.metaKey;
+
+  if (meta && e.key === 's') {
+    e.preventDefault();
+    flushSave();
+    return;
+  }
+
+  if (meta && e.key === 'n') {
+    e.preventDefault();
+    newNote();
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    if (!dom.modalOverlay.classList.contains('hidden')) {
+      hideDeleteModal();
+    } else if (dom.sidebar.classList.contains('open')) {
+      dom.sidebar.classList.remove('open');
+      dom.sidebarToggle.setAttribute('aria-expanded', 'false');
+    }
+  }
+});
+
+function init() {
+  var stored = loadFromStorage();
+
+  if (stored === null) {
+    seedSampleNotes();
+  } else {
+    state.notes = stored;
+  }
+
+  renderNotesList();
+
+  if (state.notes.length > 0) {
+    var best = state.notes.slice().sort(function (a, b) {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.modifiedAt - a.modifiedAt;
+    })[0];
+    selectNote(best.id);
+  } else {
+    dom.emptyState.classList.remove('hidden');
+    dom.noteEditor.classList.add('hidden');
+  }
+}
+
+init();

@@ -1,0 +1,25 @@
+{
+  "name": "markdown-notes",
+  "version": "1.0.0",
+  "description": "A lightweight Markdown notes application with live preview, search, and local storage persistence.",
+  "main": "script.js",
+  "scripts": {
+    "start": "npx serve .",
+    "dev": "npx serve ."
+  },
+  "keywords": [
+    "markdown",
+    "notes",
+    "vanilla-js",
+    "live-preview",
+    "localstorage",
+    "editor",
+    "minimal"
+  ],
+  "author": "hanx (https://hanx.pro)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/markdown-notes.git"
+  }
+}

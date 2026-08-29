@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="A lightweight Markdown notes application with live preview, search, and local storage persistence." />
+  <title>Markdown Notes</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+  <!-- made by hanx https://hanx.pro -->
+  <!-- last update/touched 26.08.2026 -->
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
+      <h2 id="modal-title" class="modal-title">Delete Note</h2>
+      <p class="modal-body">Are you sure you want to delete this note? This action cannot be undone.</p>
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn btn-secondary">Cancel</button>
+        <button id="modal-confirm" class="btn btn-danger">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-container">
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="app-title">Notes</span>
+        <button id="btn-new-note" class="btn btn-primary" title="New Note (Ctrl+N)" aria-label="Create new note">+
+          New</button>
+      </div>
+
+      <div class="sidebar-search">
+        <input type="search" id="search-input" placeholder="Search notes..." autocomplete="off"
+          aria-label="Search notes" />
+      </div>
+
+      <div class="sidebar-sort">
+        <label for="sort-select" class="sort-label">Sort by</label>
+        <select id="sort-select" aria-label="Sort notes">
+          <option value="modified">Last Modified</option>
+          <option value="created">Date Created</option>
+          <option value="title">Title A-Z</option>
+        </select>
+      </div>
+
+      <ul id="notes-list" class="notes-list" role="listbox" aria-label="Notes list"></ul>
+
+      <div class="sidebar-footer">
+        <span id="notes-count" class="notes-count"></span>
+      </div>
+    </aside>
+
+    <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar"
+      aria-expanded="false">&#9776;</button>
+
+    <main class="main-area" id="main-area">
+
+      <div id="empty-state" class="empty-state">
+        <div class="empty-state-icon">&#9998;</div>
+        <p class="empty-state-title">No note selected</p>
+        <p class="empty-state-sub">Select a note from the sidebar or create a new one.</p>
+        <button id="btn-new-note-empty" class="btn btn-primary">Create Note</button>
+      </div>
+
+      <div id="note-editor" class="note-editor hidden">
+
+        <div class="editor-toolbar">
+          <div class="toolbar-left">
+            <input type="text" id="note-title-input" class="note-title-input" placeholder="Untitled Note"
+              maxlength="200" aria-label="Note title" />
+          </div>
+          <div class="toolbar-right">
+            <span id="save-indicator" class="save-indicator" aria-live="polite"></span>
+            <button id="btn-pin" class="btn btn-icon" title="Pin note" aria-label="Pin note" aria-pressed="false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="12" y1="17" x2="12" y2="22" />
+                <path
+                  d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+              </svg>
+            </button>
+            <button id="btn-delete" class="btn btn-icon btn-icon-danger" title="Delete note" aria-label="Delete note">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6M14 11v6" />
+                <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+              </svg>
+            </button>
+            <button id="btn-toggle-view" class="btn btn-secondary btn-sm" title="Toggle view"
+              aria-label="Toggle view">Preview</button>
+          </div>
+        </div>
+
+        <div class="editor-panels" id="editor-panels">
+          <div class="pane pane-editor" id="pane-editor">
+            <div class="pane-header">Editor <span class="shortcut-hint">Ctrl+S to save</span></div>
+            <textarea id="markdown-input" class="markdown-input" placeholder="Write Markdown here..." spellcheck="true"
+              aria-label="Markdown editor"></textarea>
+          </div>
+
+          <div class="pane-divider" id="pane-divider" role="separator" aria-orientation="vertical"></div>
+
+          <div class="pane pane-preview" id="pane-preview">
+            <div class="pane-header">Preview</div>
+            <div id="preview-output" class="preview-output" aria-label="Markdown preview" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="editor-footer">
+          <span id="char-count" class="char-count"></span>
+          <span id="last-modified" class="last-modified"></span>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <span>site made by <a href="https://hanx.lol" target="_blank" rel="noopener noreferrer">hanx.lol</a></span>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
