@@ -1,12 +1,12 @@
 # Markdown Notes
 
-A minimal, self-contained Markdown note-taking web app. Pure HTML, CSS, and vanilla JavaScript with zero dependencies and no build step. Notes are saved directly to your browser's `localStorage`.
+A minimal, self-contained Markdown note-taking web app. Pure HTML, CSS, and vanilla JavaScript with zero dependencies and no build step. Notes are saved directly to your browser's `IndexedDB` with `localStorage` fallback.
 
 ## Features
 
 - **Live Preview:** Side-by-side editing and rendering.
 - **Custom View Modes:** Switch between split view, editor-only, and preview-only.
-- **Auto-save:** Automatically writes changes to `localStorage` with debouncing.
+- **Fast Auto-save:** Asynchronous, non-blocking persistence using IndexedDB.
 - **Search & Sort:** Filter notes instantly by title or content; sort by last modified, creation date, or alphabetical title.
 - **Pinning:** Pin important notes to the top of the sidebar.
 - **Resizable Split Pane:** Drag the divider to adjust editor vs. preview width.

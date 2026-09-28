@@ -2,6 +2,7 @@
 
 var STORAGE_KEY = 'markdownNotes_v1';
 var FIRST_LAUNCH_KEY = 'markdownNotes_firstLaunch';
+var THEME_KEY = 'markdownNotes_theme';
 
 // made by hanx https://hanx.pro
 // last update/touched 26.08.2026
@@ -30,24 +31,104 @@ function createNote(title, content) {
   };
 }
 
-function saveToStorage() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.notes));
-  } catch (e) {
-    console.warn('localStorage save failed:', e);
-  }
+var dbPromise = null;
+
+function openDatabase() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise(function (resolve) {
+    if (!window.indexedDB) {
+      resolve(null);
+      return;
+    }
+    var req = indexedDB.open('markdownNotesDB', 1);
+    req.onupgradeneeded = function (e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains('notes')) {
+        var store = db.createObjectStore('notes', { keyPath: 'id' });
+        store.createIndex('modifiedAt', 'modifiedAt', { unique: false });
+      }
+    };
+    req.onsuccess = function (e) {
+      resolve(e.target.result);
+    };
+    req.onerror = function () {
+      resolve(null);
+    };
+  });
+  return dbPromise;
 }
 
-function loadFromStorage() {
+function dbGetAllNotes() {
+  return openDatabase().then(function (db) {
+    if (!db) return null;
+    return new Promise(function (resolve) {
+      try {
+        var tx = db.transaction('notes', 'readonly');
+        var store = tx.objectStore('notes');
+        var req = store.getAll();
+        req.onsuccess = function () {
+          resolve(req.result || []);
+        };
+        req.onerror = function () {
+          resolve(null);
+        };
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  });
+}
+
+function dbSaveNote(note) {
+  saveToFallback();
+  return openDatabase().then(function (db) {
+    if (!db) return;
+    try {
+      var tx = db.transaction('notes', 'readwrite');
+      tx.objectStore('notes').put(note);
+    } catch (e) {}
+  });
+}
+
+function dbDeleteNote(id) {
+  saveToFallback();
+  return openDatabase().then(function (db) {
+    if (!db) return;
+    try {
+      var tx = db.transaction('notes', 'readwrite');
+      tx.objectStore('notes').delete(id);
+    } catch (e) {}
+  });
+}
+
+function dbSaveAllNotes(notes) {
+  saveToFallback();
+  return openDatabase().then(function (db) {
+    if (!db) return;
+    try {
+      var tx = db.transaction('notes', 'readwrite');
+      var store = tx.objectStore('notes');
+      for (var i = 0; i < notes.length; i++) {
+        store.put(notes[i]);
+      }
+    } catch (e) {}
+  });
+}
+
+function saveToFallback() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.notes));
+  } catch (e) {}
+}
+
+function loadFromFallback() {
   try {
     var raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       var parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed;
     }
-  } catch (e) {
-    console.warn('localStorage load failed:', e);
-  }
+  } catch (e) {}
   return null;
 }
 
@@ -57,7 +138,7 @@ var SAMPLE_CONTENT = [
     content: [
       '# Welcome to Markdown Notes',
       '',
-      'This is your personal Markdown notes app. Everything is saved locally in your browser.',
+      'This is your personal Markdown notes app. Everything is saved locally with fast IndexedDB persistence.',
       '',
       '## Features',
       '',
@@ -77,10 +158,8 @@ var SAMPLE_CONTENT = [
       '## Tips',
       '',
       '- Click **Preview** in the toolbar to cycle views: split, preview only, editor only.',
-      '- Notes are auto-saved 600 ms after you stop typing.',
+      '- Notes are auto-saved automatically as you type.',
       '- Drag the center divider to resize the editor and preview panes.',
-      '',
-      '> All notes are saved in your browser localStorage and persist between sessions.',
     ].join('\n'),
   },
   {
@@ -138,36 +217,6 @@ var SAMPLE_CONTENT = [
       '---',
     ].join('\n'),
   },
-  {
-    title: 'Project Ideas',
-    content: [
-      '# Project Ideas',
-      '',
-      '## In Progress',
-      '',
-      '- Personal Markdown notes app',
-      '- Command-line task manager',
-      '',
-      '## Backlog',
-      '',
-      '1. Static site generator from Markdown',
-      '2. Browser extension for quick capture',
-      '3. Terminal system stats dashboard',
-      '4. Pomodoro timer with task tracking',
-      '',
-      '## Reading List',
-      '',
-      '- *The Pragmatic Programmer*',
-      '- *Structure and Interpretation of Computer Programs*',
-      '- *Clean Code* by Robert C. Martin',
-      '',
-      '---',
-      '',
-      '> "The best way to predict the future is to invent it." — Alan Kay',
-      '',
-      '**Next review:** pick one item from backlog and set a start date.',
-    ].join('\n'),
-  },
 ];
 
 function seedSampleNotes() {
@@ -185,8 +234,10 @@ function seedSampleNotes() {
     });
   }
   state.notes = notes;
-  saveToStorage();
-  localStorage.setItem(FIRST_LAUNCH_KEY, 'done');
+  dbSaveAllNotes(notes);
+  try {
+    localStorage.setItem(FIRST_LAUNCH_KEY, 'done');
+  } catch (e) {}
 }
 
 function byId(id) { return document.getElementById(id); }
@@ -194,8 +245,10 @@ function byId(id) { return document.getElementById(id); }
 var dom = {
   sidebar: byId('sidebar'),
   sidebarToggle: byId('sidebar-toggle'),
+  sidebarBackdrop: byId('sidebar-backdrop'),
   notesList: byId('notes-list'),
   notesCount: byId('notes-count'),
+  btnTheme: byId('btn-theme'),
   searchInput: byId('search-input'),
   sortSelect: byId('sort-select'),
   btnNewNote: byId('btn-new-note'),
@@ -216,6 +269,41 @@ var dom = {
   modalCancel: byId('modal-cancel'),
   modalConfirm: byId('modal-confirm'),
 };
+
+function getInitialTheme() {
+  var saved = localStorage.getItem(THEME_KEY);
+  if (saved === 'dark' || saved === 'light') return saved;
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  var metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) {
+    metaTheme.setAttribute('content', theme === 'dark' ? '#09090b' : '#fafafa');
+  }
+  if (dom.btnTheme) {
+    dom.btnTheme.title = 'Switch to ' + (theme === 'dark' ? 'light' : 'dark') + ' theme';
+    dom.btnTheme.setAttribute('aria-label', 'Switch to ' + (theme === 'dark' ? 'light' : 'dark') + ' theme');
+    if (theme === 'dark') {
+      dom.btnTheme.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+    } else {
+      dom.btnTheme.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>';
+    }
+  }
+}
+
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme') || 'light';
+  var next = current === 'dark' ? 'light' : 'dark';
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch (e) {}
+  applyTheme(next);
+}
 
 var Markdown = (function () {
 
@@ -533,6 +621,7 @@ function renderNotesList() {
       var badge = document.createElement('span');
       badge.className = 'note-pin-badge';
       badge.setAttribute('aria-label', 'Pinned');
+      badge.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path></svg>';
       metaEl.appendChild(badge);
     }
 
@@ -593,6 +682,18 @@ function getNoteById(id) {
   return null;
 }
 
+function closeMobileSidebar() {
+  dom.sidebar.classList.remove('open');
+  if (dom.sidebarBackdrop) dom.sidebarBackdrop.classList.add('hidden');
+  dom.sidebarToggle.setAttribute('aria-expanded', 'false');
+}
+
+function openMobileSidebar() {
+  dom.sidebar.classList.add('open');
+  if (dom.sidebarBackdrop) dom.sidebarBackdrop.classList.remove('hidden');
+  dom.sidebarToggle.setAttribute('aria-expanded', 'true');
+}
+
 function selectNote(id) {
   flushSave();
 
@@ -612,8 +713,7 @@ function selectNote(id) {
   renderNotesList();
 
   if (window.innerWidth <= 768) {
-    dom.sidebar.classList.remove('open');
-    dom.sidebarToggle.setAttribute('aria-expanded', 'false');
+    closeMobileSidebar();
   }
 }
 
@@ -621,7 +721,7 @@ function newNote() {
   flushSave();
   var note = createNote('', '');
   state.notes.unshift(note);
-  saveToStorage();
+  dbSaveNote(note);
   state.activeNoteId = note.id;
 
   dom.noteEditor.classList.remove('hidden');
@@ -636,6 +736,10 @@ function newNote() {
   updateEditorFooter(note);
   renderNotesList();
 
+  if (window.innerWidth <= 768) {
+    closeMobileSidebar();
+  }
+
   dom.noteTitleInput.focus();
 }
 
@@ -645,7 +749,7 @@ function deleteNote(id) {
     if (state.notes[i].id !== id) remaining.push(state.notes[i]);
   }
   state.notes = remaining;
-  saveToStorage();
+  dbDeleteNote(id);
 
   if (state.activeNoteId === id) {
     state.activeNoteId = null;
@@ -666,7 +770,7 @@ function togglePin() {
   if (!note) return;
   note.pinned = !note.pinned;
   note.modifiedAt = Date.now();
-  saveToStorage();
+  dbSaveNote(note);
   updatePinButton(note.pinned);
   updateEditorFooter(note);
   renderNotesList();
@@ -691,7 +795,7 @@ function scheduleAutoSave() {
   saveDebounceTimer = setTimeout(function () {
     flushSave();
     saveDebounceTimer = null;
-  }, 600);
+  }, 300);
 }
 
 function flushSave() {
@@ -704,7 +808,7 @@ function flushSave() {
   note.title = dom.noteTitleInput.value;
   note.content = dom.markdownInput.value;
   note.modifiedAt = Date.now();
-  saveToStorage();
+  dbSaveNote(note);
   updateEditorFooter(note);
   renderNotesList();
   dom.saveIndicator.textContent = 'Saved';
@@ -714,7 +818,7 @@ function flushSave() {
       dom.saveIndicator.textContent = '';
       dom.saveIndicator.className = 'save-indicator';
     }
-  }, 2000);
+  }, 1500);
 }
 
 function cycleViewMode() {
@@ -754,6 +858,7 @@ function hideDeleteModal() {
   var startLeftW = 0;
 
   divider.addEventListener('mousedown', function (e) {
+    if (window.innerWidth <= 768) return;
     e.preventDefault();
     dragging = true;
     startX = e.clientX;
@@ -767,8 +872,8 @@ function hideDeleteModal() {
     if (!dragging) return;
     var totalW = panels.offsetWidth;
     var newLeft = startLeftW + (e.clientX - startX);
-    if (newLeft < 150) newLeft = 150;
-    if (newLeft > totalW - 150) newLeft = totalW - 150;
+    if (newLeft < 140) newLeft = 140;
+    if (newLeft > totalW - 140) newLeft = totalW - 140;
     var paneEditor = panels.querySelector('.pane-editor');
     var panePreview = panels.querySelector('.pane-preview');
     if (paneEditor && panePreview) {
@@ -842,10 +947,22 @@ dom.modalOverlay.addEventListener('click', function (e) {
 
 dom.btnToggleView.addEventListener('click', cycleViewMode);
 
+if (dom.btnTheme) {
+  dom.btnTheme.addEventListener('click', toggleTheme);
+}
+
 dom.sidebarToggle.addEventListener('click', function () {
-  var isOpen = dom.sidebar.classList.toggle('open');
-  dom.sidebarToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  var isOpen = dom.sidebar.classList.contains('open');
+  if (isOpen) {
+    closeMobileSidebar();
+  } else {
+    openMobileSidebar();
+  }
 });
+
+if (dom.sidebarBackdrop) {
+  dom.sidebarBackdrop.addEventListener('click', closeMobileSidebar);
+}
 
 document.addEventListener('keydown', function (e) {
   var meta = e.ctrlKey || e.metaKey;
@@ -866,33 +983,66 @@ document.addEventListener('keydown', function (e) {
     if (!dom.modalOverlay.classList.contains('hidden')) {
       hideDeleteModal();
     } else if (dom.sidebar.classList.contains('open')) {
-      dom.sidebar.classList.remove('open');
-      dom.sidebarToggle.setAttribute('aria-expanded', 'false');
+      closeMobileSidebar();
     }
   }
 });
 
 function init() {
-  var stored = loadFromStorage();
+  applyTheme(getInitialTheme());
 
-  if (stored === null) {
-    seedSampleNotes();
-  } else {
-    state.notes = stored;
+  if (window.matchMedia) {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function (e) {
+      if (!localStorage.getItem(THEME_KEY)) {
+        applyTheme(e.matches ? 'dark' : 'light');
+      }
+    });
   }
 
-  renderNotesList();
-
-  if (state.notes.length > 0) {
-    var best = state.notes.slice().sort(function (a, b) {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return b.modifiedAt - a.modifiedAt;
-    })[0];
-    selectNote(best.id);
-  } else {
-    dom.emptyState.classList.remove('hidden');
-    dom.noteEditor.classList.add('hidden');
+  var isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent);
+  var shortcutHint = document.querySelector('.shortcut-hint');
+  if (shortcutHint) {
+    shortcutHint.textContent = isMac ? '⌘S to save' : 'Ctrl+S to save';
   }
+  if (dom.btnNewNote) {
+    dom.btnNewNote.title = isMac ? 'New Note (⌘N)' : 'New Note (Ctrl+N)';
+  }
+
+  // Load from IndexedDB, migrating localStorage notes if first run.
+  dbGetAllNotes().then(function (storedNotes) {
+    if (storedNotes && storedNotes.length > 0) {
+      state.notes = storedNotes.filter(function (n) {
+        if (n.title === 'Project Ideas' && n.content.indexOf('Command-line task manager') !== -1) {
+          dbDeleteNote(n.id);
+          return false;
+        }
+        return true;
+      });
+    } else {
+      var fallback = loadFromFallback();
+      if (fallback && fallback.length > 0) {
+        state.notes = fallback.filter(function (n) {
+          return !(n.title === 'Project Ideas' && n.content.indexOf('Command-line task manager') !== -1);
+        });
+        dbSaveAllNotes(state.notes);
+      } else {
+        seedSampleNotes();
+      }
+    }
+
+    renderNotesList();
+
+    if (state.notes.length > 0) {
+      var best = state.notes.slice().sort(function (a, b) {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return b.modifiedAt - a.modifiedAt;
+      })[0];
+      selectNote(best.id);
+    } else {
+      dom.emptyState.classList.remove('hidden');
+      dom.noteEditor.classList.add('hidden');
+    }
+  });
 }
 
 init();

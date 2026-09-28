@@ -1,7 +1,7 @@
 {
   "name": "markdown-notes",
   "version": "1.0.0",
-  "description": "A lightweight Markdown notes application with live preview, search, and local storage persistence.",
+  "description": "A lightweight Markdown notes application with live preview, search, and fast IndexedDB persistence.",
   "main": "script.js",
   "scripts": {
     "start": "npx serve .",
@@ -12,7 +12,7 @@
     "notes",
     "vanilla-js",
     "live-preview",
-    "localstorage",
+    "indexeddb",
     "editor",
     "minimal"
   ],
